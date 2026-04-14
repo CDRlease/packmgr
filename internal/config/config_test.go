@@ -35,10 +35,6 @@ func TestParseRejectsInvalidInputs(t *testing.T) {
 			data: `{"schemaVersion":2,"components":{"server":{"repo":"CDRlease/tgr_server","tag":"v0.2.2"}}}`,
 		},
 		{
-			name: "empty components",
-			data: `{"schemaVersion":1,"components":{}}`,
-		},
-		{
 			name: "invalid repo",
 			data: `{"schemaVersion":1,"components":{"server":{"repo":"broken","tag":"v0.2.2"}}}`,
 		},
@@ -56,6 +52,18 @@ func TestParseRejectsInvalidInputs(t *testing.T) {
 				t.Fatalf("Parse() error = nil, want error")
 			}
 		})
+	}
+}
+
+func TestParseAllowsEmptyComponents(t *testing.T) {
+	t.Parallel()
+
+	file, err := Parse([]byte(`{"schemaVersion":1,"components":{}}`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if len(file.Components) != 0 {
+		t.Fatalf("len(file.Components) = %d, want 0", len(file.Components))
 	}
 }
 
