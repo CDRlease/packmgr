@@ -1,6 +1,6 @@
 # packmgr
 
-`packmgr` 是一个用 Go 编写的轻量包管理工具，用来读取 `packages.json`，按当前机器的系统平台和 CPU 架构自动选择 release bundle，下载、校验并安装到指定目录。
+`packmgr` 是一个用 Go 编写的轻量包管理工具，既可以维护 `packages.json`，也可以按当前机器的系统平台和 CPU 架构自动选择 release bundle，下载、校验并安装到指定目录。
 
 当前版本只支持 GitHub public release 的 `release` 模式 manifest，不支持 `smoke` 模式。
 
@@ -35,7 +35,51 @@ packmgr version
 ## 使用方法
 
 ```bash
+packmgr install --dir ./vendor
+```
+
+默认会读取当前目录下的 `./packages.json`，也可以通过 `--packages` 指定其他路径：
+
+```bash
 packmgr install --packages ./examples/packages.json --dir ./vendor
+```
+
+### 配置维护命令
+
+```bash
+packmgr packages list
+packmgr packages get server
+packmgr packages add server --repo CDRlease/tgr_server --tag v0.2.2
+packmgr packages update server --tag v0.2.3
+packmgr packages remove server
+```
+
+- 所有 `packmgr packages ...` 命令默认读取 `./packages.json`
+- `add` 在文件不存在时会自动创建新的 `packages.json`
+- `list` 和 `get` 支持 `--json`
+- `add` 和 `update` 支持 `--check-release`，会在写文件前检查 GitHub release 是否存在
+
+### 查询输出示例
+
+```bash
+packmgr packages list
+```
+
+```text
+codegen repo=CDRlease/tgr_codegen tag=v0.4.4
+config repo=CDRlease/tgr_config tag=v0.1.1
+engine repo=CDRlease/tgr_engine tag=v0.1.1
+server repo=CDRlease/tgr_server tag=v0.2.2
+```
+
+```bash
+packmgr packages get server
+```
+
+```text
+name: server
+repo: CDRlease/tgr_server
+tag: v0.2.2
 ```
 
 ### `packages.json` 示例
@@ -110,6 +154,8 @@ vendor/
 ## 常见错误
 
 - `schemaVersion must be 1`：`packages.json` 结构不符合 v0.1.0 协议。
+- `component <name> already exists`：新增组件时发现重名。
+- `component <name> not found`：查询、更新或删除时找不到指定组件。
 - `no compatible bundle found`：上游 release 没有当前平台可用的 bundle，也没有 `any-any` 兜底包。
 - `checksum entry not found`：`SHA256SUMS.txt` 缺少选中 zip 或 `manifest.json` 的校验项。
 - `unsafe zip entry path`：zip 内包含绝对路径或路径穿越条目，安装被阻止。

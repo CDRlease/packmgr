@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const schemaVersionV1 = 1
+
 type File struct {
 	SchemaVersion int                  `json:"schemaVersion"`
 	Components    map[string]Component `json:"components"`
@@ -44,7 +46,7 @@ func Parse(data []byte) (File, error) {
 }
 
 func (f File) Validate() error {
-	if f.SchemaVersion != 1 {
+	if f.SchemaVersion != schemaVersionV1 {
 		return fmt.Errorf("schemaVersion must be 1")
 	}
 
@@ -61,6 +63,13 @@ func (f File) Validate() error {
 	}
 
 	return nil
+}
+
+func NewFile() File {
+	return File{
+		SchemaVersion: schemaVersionV1,
+		Components:    map[string]Component{},
+	}
 }
 
 func (f File) SortedComponents() []ResolvedComponent {
