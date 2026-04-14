@@ -1,0 +1,102 @@
+# packmgr
+
+`packmgr` 是一个用 Go 编写的轻量包管理工具，用来读取 `packages.json`，按当前机器的系统平台和 CPU 架构自动选择 release bundle，下载、校验并安装到指定目录。
+
+当前版本只支持 GitHub public release 的 `release` 模式 manifest，不支持 `smoke` 模式。
+
+## 安装
+
+从 release 下载当前平台对应的 zip，解压后直接执行：
+
+```bash
+./packmgr version
+```
+
+如果你想自己本地构建：
+
+```bash
+make build
+./bin/packmgr version
+```
+
+## 使用方法
+
+```bash
+packmgr install --packages ./examples/packages.json --dir ./vendor
+```
+
+### `packages.json` 示例
+
+```json
+{
+  "schemaVersion": 1,
+  "components": {
+    "server": {
+      "repo": "CDRlease/tgr_server",
+      "tag": "v0.2.2"
+    },
+    "engine": {
+      "repo": "CDRlease/tgr_engine",
+      "tag": "v0.1.1"
+    },
+    "config": {
+      "repo": "CDRlease/tgr_config",
+      "tag": "v0.1.1"
+    },
+    "codegen": {
+      "repo": "CDRlease/tgr_codegen",
+      "tag": "v0.4.4"
+    }
+  }
+}
+```
+
+## 安装结果
+
+安装结果是“扁平组件目录”：
+
+- 不保留版本号目录
+- 不保留 `os-arch` 目录
+- 不保留 zip 的最外层包装目录，例如 `bin/` 或 `codegen-osx-arm64/`
+- 组件根目录直接保留 payload 文件，以及上游原始 `manifest.json` 和 `SHA256SUMS.txt`
+
+例如：
+
+```text
+vendor/
+├── server/
+│   ├── manifest.json
+│   ├── SHA256SUMS.txt
+│   ├── run.sh
+│   └── mesh/mesh
+├── engine/
+│   ├── manifest.json
+│   ├── SHA256SUMS.txt
+│   └── lockstep.engine.dll
+├── config/
+│   ├── manifest.json
+│   ├── SHA256SUMS.txt
+│   ├── Luban.dll
+│   └── gen.sh
+└── codegen/
+    ├── manifest.json
+    ├── SHA256SUMS.txt
+    ├── lockstep.ecs.generator.dll
+    ├── Config/HashPrimes.json
+    └── scripts/gen.sh
+```
+
+## 环境变量
+
+- `PACKMGR_GITHUB_TOKEN`
+- `GH_TOKEN`
+- `GITHUB_TOKEN`
+
+优先级从上到下。未设置时将匿名访问 GitHub public releases。
+
+## 常见错误
+
+- `schemaVersion must be 1`：`packages.json` 结构不符合 v0.1.0 协议。
+- `no compatible bundle found`：上游 release 没有当前平台可用的 bundle，也没有 `any-any` 兜底包。
+- `checksum entry not found`：`SHA256SUMS.txt` 缺少选中 zip 或 `manifest.json` 的校验项。
+- `unsafe zip entry path`：zip 内包含绝对路径或路径穿越条目，安装被阻止。

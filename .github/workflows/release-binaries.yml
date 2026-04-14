@@ -1,0 +1,172 @@
+name: Release binaries
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-bundle:
+    name: build-${{ matrix.package_os }}-${{ matrix.package_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            package_os: linux
+            package_arch: amd64
+            binary_name: packmgr
+          - goos: linux
+            goarch: arm64
+            package_os: linux
+            package_arch: arm64
+            binary_name: packmgr
+          - goos: darwin
+            goarch: amd64
+            package_os: osx
+            package_arch: amd64
+            binary_name: packmgr
+          - goos: darwin
+            goarch: arm64
+            package_os: osx
+            package_arch: arm64
+            binary_name: packmgr
+          - goos: windows
+            goarch: amd64
+            package_os: win
+            package_arch: amd64
+            binary_name: packmgr.exe
+          - goos: windows
+            goarch: arm64
+            package_os: win
+            package_arch: arm64
+            binary_name: packmgr.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.5"
+          cache: true
+
+      - name: Build bundle
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          BINARY_NAME: ${{ matrix.binary_name }}
+          PACKAGE_OS: ${{ matrix.package_os }}
+          PACKAGE_ARCH: ${{ matrix.package_arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/stage
+
+          zip_name="packmgr-${PACKAGE_OS}-${PACKAGE_ARCH}.zip"
+          bundle_meta="bundle-${PACKAGE_OS}-${PACKAGE_ARCH}.json"
+          binary_path="dist/stage/${BINARY_NAME}"
+
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${TAG_NAME}" \
+            -o "${binary_path}" \
+            ./cmd/packmgr
+
+          cp README.md LICENSE dist/stage/
+
+          (
+            cd dist/stage
+            zip -qr "../${zip_name}" "${BINARY_NAME}" README.md LICENSE
+          )
+
+          jq -n \
+            --arg name "$zip_name" \
+            --arg os "$PACKAGE_OS" \
+            --arg arch "$PACKAGE_ARCH" \
+            --arg binary "$BINARY_NAME" \
+            '{
+              name: $name,
+              os: $os,
+              arch: $arch,
+              validation: {
+                type: "bundle-entry-exists",
+                paths: [$binary, "README.md", "LICENSE"]
+              }
+            }' > "dist/${bundle_meta}"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ matrix.package_os }}-${{ matrix.package_arch }}
+          path: |
+            dist/packmgr-${{ matrix.package_os }}-${{ matrix.package_arch }}.zip
+            dist/bundle-${{ matrix.package_os }}-${{ matrix.package_arch }}.json
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-release:
+    name: publish-release
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-bundle-*
+          merge-multiple: true
+
+      - name: Build manifest and checksums
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          bundle_count="$(find dist -maxdepth 1 -name 'bundle-*.json' | wc -l | tr -d ' ')"
+          zip_count="$(find dist -maxdepth 1 -name 'packmgr-*.zip' | wc -l | tr -d ' ')"
+          if [ "$bundle_count" -ne 6 ] || [ "$zip_count" -ne 6 ]; then
+            echo "expected 6 bundle metadata files and 6 zip files" >&2
+            exit 1
+          fi
+
+          built_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          jq -n \
+            --arg component "packmgr" \
+            --arg sourceRepo "$GITHUB_REPOSITORY" \
+            --arg tag "$TAG_NAME" \
+            --arg commitSha "$GITHUB_SHA" \
+            --arg builtAt "$built_at" \
+            --argjson bundles "$(jq -s 'sort_by(.os, .arch)' dist/bundle-*.json)" \
+            '{
+              schemaVersion: 1,
+              mode: "release",
+              component: $component,
+              sourceRepo: $sourceRepo,
+              tag: $tag,
+              commitSha: $commitSha,
+              builtAt: $builtAt,
+              bundles: $bundles
+            }' > dist/manifest.json
+
+          (
+            cd dist
+            sha256sum packmgr-*.zip manifest.json > SHA256SUMS.txt
+          )
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" \
+            dist/packmgr-*.zip \
+            dist/manifest.json \
+            dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
