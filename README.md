@@ -19,6 +19,19 @@ make build
 ./bin/packmgr version
 ```
 
+如果你想把 `packmgr` 安装到 Go 的 bin 目录，并加入当前用户 shell 的 PATH：
+
+```bash
+make install VERSION=v0.1.0
+```
+
+这个命令会把二进制安装到 `$(go env GOPATH)/bin`，并把这个目录写入你的 shell 启动文件。
+安装完成后，重新打开一个终端，或者执行 `source ~/.zshrc`，就可以直接调用：
+
+```bash
+packmgr version
+```
+
 ## 使用方法
 
 ```bash
