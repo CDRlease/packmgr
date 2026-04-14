@@ -44,12 +44,11 @@ jobs:
             binary_name: packmgr.exe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.23.5"
-          cache: true
 
       - name: Build bundle
         env:
