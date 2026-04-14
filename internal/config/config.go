@@ -47,9 +47,6 @@ func (f File) Validate() error {
 	if f.SchemaVersion != 1 {
 		return fmt.Errorf("schemaVersion must be 1")
 	}
-	if len(f.Components) == 0 {
-		return fmt.Errorf("components must not be empty")
-	}
 
 	for name, component := range f.Components {
 		if strings.TrimSpace(name) == "" {

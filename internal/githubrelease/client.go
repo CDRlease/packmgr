@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -44,7 +45,7 @@ func NewClient(opts Options) *Client {
 
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 60 * time.Second}
+		httpClient = defaultHTTPClient()
 	}
 
 	return &Client{
@@ -133,6 +134,24 @@ func (c *Client) decorateAPIRequest(request *http.Request) {
 	request.Header.Set("User-Agent", "packmgr")
 	if c.token != "" {
 		request.Header.Set("Authorization", "Bearer "+c.token)
+	}
+}
+
+func defaultHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+		},
 	}
 }
 
