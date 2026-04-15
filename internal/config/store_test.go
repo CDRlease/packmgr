@@ -69,6 +69,33 @@ func TestSaveFileRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveFileRoundTripPreservesLatestTag(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "packages.json")
+	file := NewFile()
+	if err := file.AddComponent("server", Component{Repo: "CDRlease/tgr_server", Tag: LatestTag}); err != nil {
+		t.Fatalf("AddComponent() error = %v", err)
+	}
+
+	if err := SaveFile(path, file); err != nil {
+		t.Fatalf("SaveFile() error = %v", err)
+	}
+
+	loaded, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile() error = %v", err)
+	}
+
+	component, ok := loaded.GetComponent("server")
+	if !ok {
+		t.Fatalf("GetComponent(server) ok = false, want true")
+	}
+	if component.Tag != LatestTag {
+		t.Fatalf("component.Tag = %q, want %q", component.Tag, LatestTag)
+	}
+}
+
 func TestSaveFilePreservesExistingPermissions(t *testing.T) {
 	t.Parallel()
 
@@ -177,6 +204,29 @@ func TestUpdateComponentRejectsInvalidAndRollsBack(t *testing.T) {
 	component, _ := file.GetComponent("server")
 	if component.Repo != "CDRlease/tgr_server" || component.Tag != "v0.2.2" {
 		t.Fatalf("component = %#v, want rollback to original value", component)
+	}
+}
+
+func TestUpdateComponentSupportsLatestTag(t *testing.T) {
+	t.Parallel()
+
+	file := NewFile()
+	if err := file.AddComponent("server", Component{Repo: "CDRlease/tgr_server", Tag: "v0.2.2"}); err != nil {
+		t.Fatalf("AddComponent() error = %v", err)
+	}
+
+	tag := LatestTag
+	changed, err := file.UpdateComponent("server", ComponentPatch{Tag: &tag})
+	if err != nil {
+		t.Fatalf("UpdateComponent() error = %v", err)
+	}
+	if !changed {
+		t.Fatalf("UpdateComponent() changed = false, want true")
+	}
+
+	component, _ := file.GetComponent("server")
+	if component.Tag != LatestTag {
+		t.Fatalf("component.Tag = %q, want %q", component.Tag, LatestTag)
 	}
 }
 

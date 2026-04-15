@@ -9,6 +9,7 @@ import (
 )
 
 const schemaVersionV1 = 1
+const LatestTag = "latest"
 
 type File struct {
 	SchemaVersion int                  `json:"schemaVersion"`
@@ -70,6 +71,10 @@ func NewFile() File {
 		SchemaVersion: schemaVersionV1,
 		Components:    map[string]Component{},
 	}
+}
+
+func IsLatestTag(tag string) bool {
+	return strings.TrimSpace(tag) == LatestTag
 }
 
 func (f File) SortedComponents() []ResolvedComponent {

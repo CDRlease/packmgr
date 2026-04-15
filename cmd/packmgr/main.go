@@ -359,12 +359,13 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Defaults:")
 	fmt.Fprintf(w, "  packages file: %s\n", defaultPackagesPath)
 	fmt.Fprintln(w, "  GitHub token lookup order: PACKMGR_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN")
+	fmt.Fprintln(w, "  latest means GitHub's official latest stable release")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples:")
 	fmt.Fprintln(w, "  packmgr install --dir ./vendor")
 	fmt.Fprintln(w, "  packmgr packages list")
 	fmt.Fprintln(w, "  packmgr packages get server --json")
-	fmt.Fprintln(w, "  packmgr packages add tools --repo owner/tools --tag v1.2.3 --check-release")
+	fmt.Fprintln(w, "  packmgr packages add tools --repo owner/tools --tag latest --check-release")
 }
 
 func printInstallUsage(w io.Writer) {
@@ -386,6 +387,7 @@ func printInstallUsage(w io.Writer) {
 	fmt.Fprintln(w, "Install layout:")
 	fmt.Fprintln(w, "  Each component is installed as a flattened directory that keeps payload files,")
 	fmt.Fprintln(w, "  manifest.json, and SHA256SUMS.txt directly under <target-dir>/<component>/")
+	fmt.Fprintln(w, "  When tag=latest, packmgr resolves GitHub's official latest stable release at install time")
 }
 
 func printPackagesUsage(w io.Writer) {
@@ -402,6 +404,7 @@ func printPackagesUsage(w io.Writer) {
 	fmt.Fprintln(w, "Defaults:")
 	fmt.Fprintf(w, "  --packages defaults to %s\n", defaultPackagesPath)
 	fmt.Fprintln(w, "  add creates a new packages.json when the target file does not exist")
+	fmt.Fprintln(w, "  tag=latest resolves GitHub's official latest stable release during install/check-release")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Outputs:")
 	fmt.Fprintln(w, "  list        text: <name> repo=<repo> tag=<tag>")
@@ -412,8 +415,8 @@ func printPackagesUsage(w io.Writer) {
 	fmt.Fprintln(w, "Examples:")
 	fmt.Fprintln(w, "  packmgr packages list")
 	fmt.Fprintln(w, "  packmgr packages get server --json")
-	fmt.Fprintln(w, "  packmgr packages add server --repo CDRlease/tgr_server --tag v0.2.2")
-	fmt.Fprintln(w, "  packmgr packages update server --tag v0.2.3 --check-release")
+	fmt.Fprintln(w, "  packmgr packages add server --repo CDRlease/tgr_server --tag latest --check-release")
+	fmt.Fprintln(w, "  packmgr packages update server --tag latest --check-release")
 	fmt.Fprintln(w, "  packmgr packages remove server")
 }
 
@@ -438,7 +441,12 @@ func loadPackagesForWrite(path string, allowMissing bool) (config.File, error) {
 }
 
 func ensureReleaseExists(repo, tag string) error {
-	_, err := newReleaseClient().FetchRelease(context.Background(), repo, tag)
+	client := newReleaseClient()
+	if config.IsLatestTag(tag) {
+		_, err := client.FetchLatestRelease(context.Background(), repo)
+		return err
+	}
+	_, err := client.FetchRelease(context.Background(), repo, tag)
 	return err
 }
 
