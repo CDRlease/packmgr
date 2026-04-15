@@ -65,6 +65,9 @@ func TokenFromEnv() string {
 }
 
 func (c *Client) FetchRelease(ctx context.Context, repo, tag string) (*Release, error) {
+	if isLatestTag(tag) {
+		return c.FetchLatestRelease(ctx, repo)
+	}
 	requestURL := fmt.Sprintf("%s/repos/%s/releases/tags/%s", c.baseURL, repo, url.PathEscape(tag))
 	return c.fetchRelease(ctx, requestURL, fmt.Sprintf("fetch release %s@%s", repo, tag))
 }
@@ -136,6 +139,10 @@ func (r Release) FindAsset(name string) (Asset, bool) {
 		}
 	}
 	return Asset{}, false
+}
+
+func isLatestTag(tag string) bool {
+	return strings.TrimSpace(tag) == "latest"
 }
 
 func (c *Client) decorateAPIRequest(request *http.Request) {
