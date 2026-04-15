@@ -60,9 +60,12 @@ func (m *Manager) installComponent(ctx context.Context, component config.Resolve
 	fmt.Fprintf(m.log, "  repo           : %s\n", component.Repo)
 	fmt.Fprintf(m.log, "  version        : %s\n", component.Tag)
 
-	release, err := m.client.FetchRelease(ctx, component.Repo, component.Tag)
+	release, err := m.fetchRelease(ctx, component)
 	if err != nil {
 		return err
+	}
+	if config.IsLatestTag(component.Tag) {
+		fmt.Fprintf(m.log, "  resolved tag   : %s\n", release.TagName)
 	}
 
 	manifestAsset, ok := release.FindAsset("manifest.json")
@@ -147,6 +150,13 @@ func (m *Manager) installComponent(ctx context.Context, component config.Resolve
 	fmt.Fprintf(m.log, "  install dir    : %s\n", componentDir)
 	fmt.Fprintln(m.log, "  extract        : ok")
 	return nil
+}
+
+func (m *Manager) fetchRelease(ctx context.Context, component config.ResolvedComponent) (*githubrelease.Release, error) {
+	if config.IsLatestTag(component.Tag) {
+		return m.client.FetchLatestRelease(ctx, component.Repo)
+	}
+	return m.client.FetchRelease(ctx, component.Repo, component.Tag)
 }
 
 func InstallBundle(options BundleInstallOptions) error {

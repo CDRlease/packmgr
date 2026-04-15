@@ -49,8 +49,8 @@ packmgr install --packages ./examples/packages.json --dir ./vendor
 ```bash
 packmgr packages list
 packmgr packages get server
-packmgr packages add server --repo CDRlease/tgr_server --tag v0.2.2
-packmgr packages update server --tag v0.2.3
+packmgr packages add server --repo CDRlease/tgr_server --tag latest --check-release
+packmgr packages update server --tag latest --check-release
 packmgr packages remove server
 ```
 
@@ -58,6 +58,7 @@ packmgr packages remove server
 - `add` 在文件不存在时会自动创建新的 `packages.json`
 - `list` 和 `get` 支持 `--json`
 - `add` 和 `update` 支持 `--check-release`，会在写文件前检查 GitHub release 是否存在
+- `tag: "latest"` 表示 GitHub 官方 `latest release`，会在安装或 `--check-release` 时动态解析
 
 ### 查询输出示例
 
@@ -108,6 +109,20 @@ tag: v0.2.2
 }
 ```
 
+也支持在配置里直接写 `latest`：
+
+```json
+{
+  "schemaVersion": 1,
+  "components": {
+    "server": {
+      "repo": "CDRlease/tgr_server",
+      "tag": "latest"
+    }
+  }
+}
+```
+
 ## 安装结果
 
 安装结果是“扁平组件目录”：
@@ -116,6 +131,7 @@ tag: v0.2.2
 - 不保留 `os-arch` 目录
 - 不保留 zip 的最外层包装目录，例如 `bin/` 或 `codegen-osx-arm64/`
 - 组件根目录直接保留 payload 文件，以及上游原始 `manifest.json` 和 `SHA256SUMS.txt`
+- 当组件配置为 `tag: "latest"` 时，安装日志会显示原始值 `latest`，以及本次实际解析到的 `resolved tag`
 
 例如：
 
@@ -156,6 +172,7 @@ vendor/
 - `schemaVersion must be 1`：`packages.json` 结构不符合 v0.1.0 协议。
 - `component <name> already exists`：新增组件时发现重名。
 - `component <name> not found`：查询、更新或删除时找不到指定组件。
+- `fetch latest release <repo>`：指定了 `latest`，但该仓库没有可用的 GitHub latest release。
 - `no compatible bundle found`：上游 release 没有当前平台可用的 bundle，也没有 `any-any` 兜底包。
 - `checksum entry not found`：`SHA256SUMS.txt` 缺少选中 zip 或 `manifest.json` 的校验项。
 - `unsafe zip entry path`：zip 内包含绝对路径或路径穿越条目，安装被阻止。

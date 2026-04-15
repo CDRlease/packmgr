@@ -67,6 +67,30 @@ func TestParseAllowsEmptyComponents(t *testing.T) {
 	}
 }
 
+func TestParseAllowsLatestTag(t *testing.T) {
+	t.Parallel()
+
+	file, err := Parse([]byte(`{
+		"schemaVersion": 1,
+		"components": {
+			"server": {
+				"repo": "CDRlease/tgr_server",
+				"tag": "latest"
+			}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	got := file.Components["server"].Tag
+	if got != LatestTag {
+		t.Fatalf("Tag = %q, want %q", got, LatestTag)
+	}
+	if !IsLatestTag(got) {
+		t.Fatalf("IsLatestTag(%q) = false, want true", got)
+	}
+}
+
 func TestSortedComponents(t *testing.T) {
 	t.Parallel()
 

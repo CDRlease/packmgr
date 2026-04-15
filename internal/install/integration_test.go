@@ -1,6 +1,7 @@
 package install
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -187,6 +188,66 @@ func TestManagerRejectsMissingCompatibleBundle(t *testing.T) {
 	err := manager.Install(context.Background(), lockFile, t.TempDir(), platform.Target{OS: "osx", Arch: "arm64"})
 	if err == nil || !strings.Contains(err.Error(), "no compatible bundle found") {
 		t.Fatalf("Install() error = %v, want missing compatible bundle", err)
+	}
+}
+
+func TestManagerInstallsLatestReleaseAndLogsResolvedTag(t *testing.T) {
+	t.Parallel()
+
+	server := testfixtures.NewReleaseServer()
+	defer server.Close()
+
+	server.AddRelease("CDRlease/tgr_server", "v0.2.3", makeReleaseFixture("server", "v0.2.3",
+		manifest.Bundle{
+			Name: "server-osx-arm64.zip",
+			OS:   "osx",
+			Arch: "arm64",
+			Validation: manifest.Validation{
+				Type: "bundle-entry-exists",
+				Paths: []string{
+					"bin/run.sh",
+					"bin/mesh/mesh",
+				},
+			},
+		},
+		map[string]string{
+			"server-osx-arm64.zip": string(testfixtures.BuildZip(map[string]string{
+				"bin/run.sh":    "#!/usr/bin/env bash\n",
+				"bin/mesh/mesh": "mesh binary",
+			})),
+		},
+	))
+	server.SetLatest("CDRlease/tgr_server", "v0.2.3")
+
+	client := githubrelease.NewClient(githubrelease.Options{
+		BaseURL:    server.BaseURL(),
+		HTTPClient: server.HTTPClient(),
+	})
+
+	lockFile := config.File{
+		SchemaVersion: 1,
+		Components: map[string]config.Component{
+			"server": {Repo: "CDRlease/tgr_server", Tag: config.LatestTag},
+		},
+	}
+
+	targetRoot := t.TempDir()
+	var log bytes.Buffer
+	manager := NewManager(client, &log)
+
+	if err := manager.Install(context.Background(), lockFile, targetRoot, platform.Target{OS: "osx", Arch: "arm64"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	assertFileExists(t, filepath.Join(targetRoot, "server", "run.sh"))
+	assertFileExists(t, filepath.Join(targetRoot, "server", "mesh", "mesh"))
+
+	output := log.String()
+	if !strings.Contains(output, "version        : latest") {
+		t.Fatalf("log = %q, want latest version line", output)
+	}
+	if !strings.Contains(output, "resolved tag   : v0.2.3") {
+		t.Fatalf("log = %q, want resolved tag line", output)
 	}
 }
 

@@ -66,6 +66,15 @@ func TokenFromEnv() string {
 
 func (c *Client) FetchRelease(ctx context.Context, repo, tag string) (*Release, error) {
 	requestURL := fmt.Sprintf("%s/repos/%s/releases/tags/%s", c.baseURL, repo, url.PathEscape(tag))
+	return c.fetchRelease(ctx, requestURL, fmt.Sprintf("fetch release %s@%s", repo, tag))
+}
+
+func (c *Client) FetchLatestRelease(ctx context.Context, repo string) (*Release, error) {
+	requestURL := fmt.Sprintf("%s/repos/%s/releases/latest", c.baseURL, repo)
+	return c.fetchRelease(ctx, requestURL, fmt.Sprintf("fetch latest release %s", repo))
+}
+
+func (c *Client) fetchRelease(ctx context.Context, requestURL, action string) (*Release, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err
@@ -74,18 +83,18 @@ func (c *Client) FetchRelease(ctx context.Context, repo, tag string) (*Release, 
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("fetch release %s@%s: %w", repo, tag, err)
+		return nil, fmt.Errorf("%s: %w", action, err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		return nil, fmt.Errorf("fetch release %s@%s: unexpected status %d: %s", repo, tag, response.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("%s: unexpected status %d: %s", action, response.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var release Release
 	if err := json.NewDecoder(response.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("decode release %s@%s: %w", repo, tag, err)
+		return nil, fmt.Errorf("decode %s: %w", action, err)
 	}
 	return &release, nil
 }
