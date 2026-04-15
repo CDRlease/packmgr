@@ -70,6 +70,31 @@ func TestFetchLatestRelease(t *testing.T) {
 	}
 }
 
+func TestFetchReleaseTreatsLatestTagAsLatestRelease(t *testing.T) {
+	t.Parallel()
+
+	server := testfixtures.NewReleaseServer()
+	defer server.Close()
+
+	server.AddRelease("CDRlease/tgr_server", "v0.2.3", []testfixtures.AssetSpec{
+		{Name: "manifest.json", Content: []byte("{}")},
+	})
+	server.SetLatest("CDRlease/tgr_server", "v0.2.3")
+
+	client := NewClient(Options{
+		BaseURL:    server.BaseURL(),
+		HTTPClient: server.HTTPClient(),
+	})
+
+	release, err := client.FetchRelease(context.Background(), "CDRlease/tgr_server", "latest")
+	if err != nil {
+		t.Fatalf("FetchRelease(latest) error = %v", err)
+	}
+	if release.TagName != "v0.2.3" {
+		t.Fatalf("release.TagName = %q, want %q", release.TagName, "v0.2.3")
+	}
+}
+
 func TestFetchLatestReleaseReturnsUsefulErrorWhenMissing(t *testing.T) {
 	t.Parallel()
 
