@@ -295,7 +295,7 @@ func TestHelpOutputIncludesDetailedSections(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run(help install) code = %d, want 0; stderr = %q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "Install layout:") || !strings.Contains(got, "latest stable release") {
+	if got := stdout.String(); !strings.Contains(got, "Install layout:") || !strings.Contains(got, "latest stable release") || !strings.Contains(got, "--force-download") {
 		t.Fatalf("help install stdout = %q, want install detail", got)
 	}
 }
@@ -655,6 +655,98 @@ func TestRunInstallResolvesLatestTag(t *testing.T) {
 	output := stdout.String()
 	if !strings.Contains(output, "version        : latest") || !strings.Contains(output, "resolved tag   : v0.2.3") {
 		t.Fatalf("stdout = %q, want latest resolution log", output)
+	}
+}
+
+func TestRunInstallUsesCacheByDefaultAndSupportsForceDownload(t *testing.T) {
+	server := testfixtures.NewReleaseServer()
+	defer server.Close()
+
+	const repo = "CDRlease/tgr_server"
+	server.AddRelease(repo, "v0.2.2", makeReleaseFixture("server", "v0.2.2",
+		manifest.Bundle{
+			Name: "server-osx-arm64.zip",
+			OS:   "osx",
+			Arch: "arm64",
+			Validation: manifest.Validation{
+				Type:  "bundle-entry-exists",
+				Paths: []string{"bin/run.sh"},
+			},
+		},
+		map[string]string{
+			"server-osx-arm64.zip": string(testfixtures.BuildZip(map[string]string{
+				"bin/run.sh": "#!/usr/bin/env bash\n",
+			})),
+		},
+	))
+
+	packagesPath := filepath.Join(t.TempDir(), "packages.json")
+	setDefaultPackagesPath(t, packagesPath)
+	setReleaseClientFactory(t, func() *githubrelease.Client {
+		return githubrelease.NewClient(githubrelease.Options{
+			BaseURL:    server.BaseURL(),
+			HTTPClient: server.HTTPClient(),
+		})
+	})
+	setPlatformDetector(t, func() (platform.Target, error) {
+		return platform.Target{OS: "osx", Arch: "arm64"}, nil
+	})
+
+	file := config.NewFile()
+	if err := file.AddComponent("server", config.Component{Repo: repo, Tag: "v0.2.2"}); err != nil {
+		t.Fatalf("AddComponent() error = %v", err)
+	}
+	if err := config.SaveFile(packagesPath, file); err != nil {
+		t.Fatalf("SaveFile() error = %v", err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "vendor")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"install", "--dir", targetDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("first run(install) code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+
+	bundleDownloads := server.AssetRequestCount(repo, "server-osx-arm64.zip")
+	stalePath := filepath.Join(targetDir, "server", "stale.txt")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stale) error = %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	code = run([]string{"install", "--dir", targetDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("second run(install) code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Fatalf("stale file missing after cache-hit install: %v", err)
+	}
+	if server.AssetRequestCount(repo, "server-osx-arm64.zip") != bundleDownloads {
+		t.Fatalf("bundle downloads changed after cache-hit install")
+	}
+	if got := stdout.String(); !strings.Contains(got, "cache          : hit") || !strings.Contains(got, "download       : skipped") {
+		t.Fatalf("stdout = %q, want cache-hit install output", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+
+	code = run([]string{"install", "--dir", targetDir, "--force-download"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(install --force-download) code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale file still exists after forced install")
+	}
+	if server.AssetRequestCount(repo, "server-osx-arm64.zip") != bundleDownloads+1 {
+		t.Fatalf("bundle downloads = %d, want %d", server.AssetRequestCount(repo, "server-osx-arm64.zip"), bundleDownloads+1)
+	}
+	if got := stdout.String(); !strings.Contains(got, "cache          : bypass (--force-download)") || !strings.Contains(got, "download       : ok") {
+		t.Fatalf("stdout = %q, want forced install output", got)
 	}
 }
 

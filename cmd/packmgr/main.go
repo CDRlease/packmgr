@@ -80,6 +80,7 @@ func runInstall(args []string, stdout io.Writer) error {
 
 	packagesPath := fs.String("packages", defaultPackagesPath, "Path to packages.json")
 	targetDir := fs.String("dir", "", "Installation target directory")
+	forceDownload := fs.Bool("force-download", false, "Always redownload and replace matching installed versions")
 
 	if err := parseFlags(fs, args); err != nil {
 		return usageError{err}
@@ -109,7 +110,9 @@ func runInstall(args []string, stdout io.Writer) error {
 	fmt.Fprintf(stdout, "detected os   : %s\n", target.OS)
 	fmt.Fprintf(stdout, "detected arch : %s\n\n", target.Arch)
 
-	return manager.Install(context.Background(), lockFile, *targetDir, target)
+	return manager.Install(context.Background(), lockFile, *targetDir, target, install.InstallOptions{
+		ForceDownload: *forceDownload,
+	})
 }
 
 func runPackages(args []string, stdout io.Writer) error {
@@ -345,7 +348,7 @@ func runPackagesRemove(args []string, stdout io.Writer) error {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  packmgr install [--packages <packages.json>] --dir <target-dir>")
+	fmt.Fprintln(w, "  packmgr install [--packages <packages.json>] --dir <target-dir> [--force-download]")
 	fmt.Fprintln(w, "  packmgr packages <subcommand> [flags]")
 	fmt.Fprintln(w, "  packmgr version")
 	fmt.Fprintln(w, "  packmgr help packages")
@@ -370,7 +373,7 @@ func printUsage(w io.Writer) {
 
 func printInstallUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  packmgr install [--packages <packages.json>] --dir <target-dir>")
+	fmt.Fprintln(w, "  packmgr install [--packages <packages.json>] --dir <target-dir> [--force-download]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Description:")
 	fmt.Fprintln(w, "  Read packages.json, detect the current OS and architecture, then download,")
@@ -379,6 +382,7 @@ func printInstallUsage(w io.Writer) {
 	fmt.Fprintln(w, "Flags:")
 	fmt.Fprintf(w, "  --packages <path>  Path to packages.json (default %s)\n", defaultPackagesPath)
 	fmt.Fprintln(w, "  --dir <path>       Installation target directory (required)")
+	fmt.Fprintln(w, "  --force-download   Ignore matching installed versions and redownload assets")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Examples:")
 	fmt.Fprintln(w, "  packmgr install --dir ./vendor")
@@ -387,6 +391,7 @@ func printInstallUsage(w io.Writer) {
 	fmt.Fprintln(w, "Install layout:")
 	fmt.Fprintln(w, "  Each component is installed as a flattened directory that keeps payload files,")
 	fmt.Fprintln(w, "  manifest.json, and SHA256SUMS.txt directly under <target-dir>/<component>/")
+	fmt.Fprintln(w, "  Matching installed versions are treated as cache hits and skipped by default")
 	fmt.Fprintln(w, "  When tag=latest, packmgr resolves GitHub's official latest stable release at install time")
 }
 

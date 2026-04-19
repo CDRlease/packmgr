@@ -9,12 +9,21 @@ import (
 	"net/http/httptest"
 	"path"
 	"strings"
+	"sync"
 )
 
 type ReleaseServer struct {
 	server   *httptest.Server
 	releases map[string]map[string]*ReleaseFixture
 	latest   map[string]string
+	mu       sync.Mutex
+	requests requestCounts
+}
+
+type requestCounts struct {
+	release map[string]int
+	latest  map[string]int
+	asset   map[string]int
 }
 
 type ReleaseFixture struct {
@@ -31,6 +40,11 @@ func NewReleaseServer() *ReleaseServer {
 	fixture := &ReleaseServer{
 		releases: make(map[string]map[string]*ReleaseFixture),
 		latest:   make(map[string]string),
+		requests: requestCounts{
+			release: make(map[string]int),
+			latest:  make(map[string]int),
+			asset:   make(map[string]int),
+		},
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(fixture.handle))
 	return fixture
@@ -69,6 +83,24 @@ func (r *ReleaseServer) SetLatest(repo, tag string) {
 	r.latest[repo] = tag
 }
 
+func (r *ReleaseServer) ReleaseRequestCount(repo, tag string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requests.release[repo+"@"+tag]
+}
+
+func (r *ReleaseServer) LatestRequestCount(repo string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requests.latest[repo]
+}
+
+func (r *ReleaseServer) AssetRequestCount(repo, assetName string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requests.asset[repo+"@"+assetName]
+}
+
 func (r *ReleaseServer) handle(w http.ResponseWriter, request *http.Request) {
 	if strings.HasPrefix(request.URL.Path, "/repos/") && strings.Contains(request.URL.Path, "/releases/tags/") {
 		r.handleRelease(w, request)
@@ -94,6 +126,10 @@ func (r *ReleaseServer) handleRelease(w http.ResponseWriter, request *http.Reque
 	}
 	repo := parts[0] + "/" + parts[1]
 	tag := parts[len(parts)-1]
+
+	r.mu.Lock()
+	r.requests.release[repo+"@"+tag]++
+	r.mu.Unlock()
 
 	fixture := r.releases[repo][tag]
 	if fixture == nil {
@@ -138,6 +174,10 @@ func (r *ReleaseServer) handleLatestRelease(w http.ResponseWriter, request *http
 		return
 	}
 
+	r.mu.Lock()
+	r.requests.latest[repo]++
+	r.mu.Unlock()
+
 	fixture := r.releases[repo][tag]
 	if fixture == nil {
 		http.NotFound(w, request)
@@ -176,6 +216,10 @@ func (r *ReleaseServer) handleAsset(w http.ResponseWriter, request *http.Request
 	}
 	repo := parts[0] + "/" + parts[1]
 	assetName := parts[2]
+
+	r.mu.Lock()
+	r.requests.asset[repo+"@"+assetName]++
+	r.mu.Unlock()
 
 	for _, fixture := range r.releases[repo] {
 		if body, ok := fixture.Assets[assetName]; ok {
