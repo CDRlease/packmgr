@@ -3,6 +3,7 @@ package install
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,10 @@ type Manager struct {
 	log    io.Writer
 }
 
+type InstallOptions struct {
+	ForceDownload bool
+}
+
 type BundleInstallOptions struct {
 	ComponentName string
 	TargetRoot    string
@@ -34,52 +39,85 @@ func NewManager(client *githubrelease.Client, log io.Writer) *Manager {
 	return &Manager{client: client, log: log}
 }
 
-func (m *Manager) Install(ctx context.Context, lockFile config.File, targetRoot string, target platform.Target) error {
+func (m *Manager) Install(ctx context.Context, lockFile config.File, targetRoot string, target platform.Target, options InstallOptions) error {
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
 		return fmt.Errorf("create target root: %w", err)
 	}
 
 	components := lockFile.SortedComponents()
 	installed := 0
+	skipped := 0
 	for index, component := range components {
 		fmt.Fprintf(m.log, "[%d/%d] %s\n", index+1, len(components), component.Name)
-		if err := m.installComponent(ctx, component, targetRoot, target); err != nil {
+		didInstall, err := m.installComponent(ctx, component, targetRoot, target, options)
+		if err != nil {
 			return err
 		}
 		fmt.Fprintln(m.log)
-		installed++
+		if didInstall {
+			installed++
+			continue
+		}
+		skipped++
 	}
 
 	fmt.Fprintln(m.log, "Done.")
 	fmt.Fprintf(m.log, "Installed: %d\n", installed)
+	fmt.Fprintf(m.log, "Skipped  : %d\n", skipped)
 	fmt.Fprintln(m.log, "Failed   : 0")
 	return nil
 }
 
-func (m *Manager) installComponent(ctx context.Context, component config.ResolvedComponent, targetRoot string, target platform.Target) error {
+func (m *Manager) installComponent(ctx context.Context, component config.ResolvedComponent, targetRoot string, target platform.Target, options InstallOptions) (bool, error) {
 	fmt.Fprintf(m.log, "  repo           : %s\n", component.Repo)
 	fmt.Fprintf(m.log, "  version        : %s\n", component.Tag)
 
-	release, err := m.fetchRelease(ctx, component)
-	if err != nil {
-		return err
-	}
+	var release *githubrelease.Release
+	targetTag := component.Tag
 	if config.IsLatestTag(component.Tag) {
-		fmt.Fprintf(m.log, "  resolved tag   : %s\n", release.TagName)
+		resolvedRelease, err := m.fetchRelease(ctx, component)
+		if err != nil {
+			return false, err
+		}
+		release = resolvedRelease
+		targetTag = release.TagName
+		fmt.Fprintf(m.log, "  resolved tag   : %s\n", targetTag)
+	}
+
+	componentDir := filepath.Join(targetRoot, component.Name)
+	if options.ForceDownload {
+		fmt.Fprintln(m.log, "  cache          : bypass (--force-download)")
+	} else if installedBundle, reason, ok := installedComponentCacheHit(component, componentDir, target, targetTag); ok {
+		fmt.Fprintf(m.log, "  selected bundle: %s\n", installedBundle.Name)
+		fmt.Fprintln(m.log, "  cache          : hit")
+		fmt.Fprintln(m.log, "  download       : skipped")
+		fmt.Fprintf(m.log, "  install dir    : %s\n", componentDir)
+		fmt.Fprintln(m.log, "  extract        : skipped")
+		return false, nil
+	} else {
+		fmt.Fprintf(m.log, "  cache          : miss (%s)\n", reason)
+	}
+
+	if release == nil {
+		fetchedRelease, err := m.fetchRelease(ctx, component)
+		if err != nil {
+			return false, err
+		}
+		release = fetchedRelease
 	}
 
 	manifestAsset, ok := release.FindAsset("manifest.json")
 	if !ok {
-		return fmt.Errorf("release %s@%s is missing manifest.json", component.Repo, component.Tag)
+		return false, fmt.Errorf("release %s@%s is missing manifest.json", component.Repo, component.Tag)
 	}
 	checksumAsset, ok := release.FindAsset("SHA256SUMS.txt")
 	if !ok {
-		return fmt.Errorf("release %s@%s is missing SHA256SUMS.txt", component.Repo, component.Tag)
+		return false, fmt.Errorf("release %s@%s is missing SHA256SUMS.txt", component.Repo, component.Tag)
 	}
 
 	workDir, err := os.MkdirTemp("", "packmgr-"+component.Name+"-")
 	if err != nil {
-		return fmt.Errorf("create temp directory: %w", err)
+		return false, fmt.Errorf("create temp directory: %w", err)
 	}
 	defer os.RemoveAll(workDir)
 
@@ -87,55 +125,54 @@ func (m *Manager) installComponent(ctx context.Context, component config.Resolve
 	checksumPath := filepath.Join(workDir, "SHA256SUMS.txt")
 
 	if err := m.client.DownloadAsset(ctx, manifestAsset, manifestPath); err != nil {
-		return err
+		return false, err
 	}
 	if err := m.client.DownloadAsset(ctx, checksumAsset, checksumPath); err != nil {
-		return err
+		return false, err
 	}
 
 	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return fmt.Errorf("read manifest.json: %w", err)
+		return false, fmt.Errorf("read manifest.json: %w", err)
 	}
 
 	manifestFile, err := manifest.Parse(manifestBytes)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := manifestFile.ValidateForComponent(component.Name); err != nil {
-		return err
+		return false, err
 	}
 
 	bundle, err := manifest.SelectBundle(manifestFile, target)
 	if err != nil {
-		return err
+		return false, err
 	}
 	fmt.Fprintf(m.log, "  selected bundle: %s\n", bundle.Name)
 
 	bundleAsset, ok := release.FindAsset(bundle.Name)
 	if !ok {
-		return fmt.Errorf("release %s@%s is missing %s", component.Repo, component.Tag, bundle.Name)
+		return false, fmt.Errorf("release %s@%s is missing %s", component.Repo, component.Tag, bundle.Name)
 	}
 
 	zipPath := filepath.Join(workDir, bundle.Name)
 	if err := m.client.DownloadAsset(ctx, bundleAsset, zipPath); err != nil {
-		return err
+		return false, err
 	}
 	fmt.Fprintln(m.log, "  download       : ok")
 
 	checksumBytes, err := os.ReadFile(checksumPath)
 	if err != nil {
-		return fmt.Errorf("read SHA256SUMS.txt: %w", err)
+		return false, fmt.Errorf("read SHA256SUMS.txt: %w", err)
 	}
 	if err := manifest.ValidateChecksums(checksumBytes, map[string]string{
 		bundle.Name:     zipPath,
 		"manifest.json": manifestPath,
 	}); err != nil {
-		return err
+		return false, err
 	}
 	fmt.Fprintln(m.log, "  checksum       : ok")
 
-	componentDir := filepath.Join(targetRoot, component.Name)
 	if err := InstallBundle(BundleInstallOptions{
 		ComponentName: component.Name,
 		TargetRoot:    targetRoot,
@@ -144,12 +181,12 @@ func (m *Manager) installComponent(ctx context.Context, component config.Resolve
 		ChecksumsPath: checksumPath,
 		Bundle:        bundle,
 	}); err != nil {
-		return err
+		return false, err
 	}
 
 	fmt.Fprintf(m.log, "  install dir    : %s\n", componentDir)
 	fmt.Fprintln(m.log, "  extract        : ok")
-	return nil
+	return true, nil
 }
 
 func (m *Manager) fetchRelease(ctx context.Context, component config.ResolvedComponent) (*githubrelease.Release, error) {
@@ -157,6 +194,52 @@ func (m *Manager) fetchRelease(ctx context.Context, component config.ResolvedCom
 		return m.client.FetchLatestRelease(ctx, component.Repo)
 	}
 	return m.client.FetchRelease(ctx, component.Repo, component.Tag)
+}
+
+func installedComponentCacheHit(component config.ResolvedComponent, componentDir string, target platform.Target, targetTag string) (manifest.Bundle, string, bool) {
+	if _, err := os.Stat(componentDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return manifest.Bundle{}, "not installed", false
+		}
+		return manifest.Bundle{}, fmt.Sprintf("stat install dir: %v", err), false
+	}
+
+	installedManifest, installedBundle, err := loadInstalledComponent(component.Name, componentDir, target)
+	if err != nil {
+		return manifest.Bundle{}, err.Error(), false
+	}
+	if installedManifest.Tag != targetTag {
+		return manifest.Bundle{}, fmt.Sprintf("installed tag %s does not match target %s", installedManifest.Tag, targetTag), false
+	}
+	return installedBundle, "", true
+}
+
+func loadInstalledComponent(componentName, componentDir string, target platform.Target) (manifest.File, manifest.Bundle, error) {
+	manifestPath := filepath.Join(componentDir, "manifest.json")
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return manifest.File{}, manifest.Bundle{}, fmt.Errorf("installed manifest.json not found")
+		}
+		return manifest.File{}, manifest.Bundle{}, fmt.Errorf("read installed manifest.json: %w", err)
+	}
+
+	manifestFile, err := manifest.Parse(manifestBytes)
+	if err != nil {
+		return manifest.File{}, manifest.Bundle{}, err
+	}
+	if err := manifestFile.ValidateForComponent(componentName); err != nil {
+		return manifest.File{}, manifest.Bundle{}, err
+	}
+
+	bundle, err := manifest.SelectBundle(manifestFile, target)
+	if err != nil {
+		return manifest.File{}, manifest.Bundle{}, err
+	}
+	if err := validateInstalledFiles(componentDir, bundle); err != nil {
+		return manifest.File{}, manifest.Bundle{}, err
+	}
+	return manifestFile, bundle, nil
 }
 
 func InstallBundle(options BundleInstallOptions) error {

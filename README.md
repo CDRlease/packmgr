@@ -45,6 +45,12 @@ packmgr version
 packmgr install --dir ./vendor
 ```
 
+如果你希望即使版本一致也重新下载并覆盖本地安装，可以显式传入：
+
+```bash
+packmgr install --dir ./vendor --force-download
+```
+
 默认会读取当前目录下的 `./packages.json`，也可以通过 `--packages` 指定其他路径：
 
 ```bash
@@ -66,6 +72,8 @@ packmgr packages remove server
 - `list` 和 `get` 支持 `--json`
 - `add` 和 `update` 支持 `--check-release`，会在写文件前检查 GitHub release 是否存在
 - `tag: "latest"` 表示 GitHub 官方 `latest release`，会在安装或 `--check-release` 时动态解析
+- `install` 默认会把目标目录中已安装组件视为本地缓存；当本地 `manifest.json` 的版本与本次目标版本一致时，会跳过下载
+- 只有显式传入 `--force-download` 时，`install` 才会忽略缓存命中并重新下载覆盖
 
 ### 查询输出示例
 
@@ -138,6 +146,7 @@ tag: v0.2.2
 - 不保留 `os-arch` 目录
 - 不保留 zip 的最外层包装目录，例如 `bin/` 或 `codegen-osx-arm64/`
 - 组件根目录直接保留 payload 文件，以及上游原始 `manifest.json` 和 `SHA256SUMS.txt`
+- 再次执行 `install` 时，如果本地已安装版本与目标版本一致，默认直接命中缓存并跳过下载
 - 当组件配置为 `tag: "latest"` 时，安装日志会显示原始值 `latest`，以及本次实际解析到的 `resolved tag`
 
 例如：
