@@ -6,6 +6,13 @@
 
 ## 安装
 
+如果你本机已安装 [Go](https://go.dev/dl/)（本仓库要求 **Go 1.23+**），可以直接用 `go install` 从源码安装到 `$(go env GOPATH)/bin`（请确保该目录已在 `PATH` 中）：
+
+```bash
+go install github.com/CDRlease/packmgr/cmd/packmgr@latest
+```
+
+
 从 release 下载当前平台对应的 zip，解压后直接执行：
 
 ```bash
